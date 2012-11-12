@@ -8,8 +8,8 @@ saleseforce-email-fixer - a utility that helps make incoming emails from
 
 SYNOPSIS
 
-  salesforce-email-fixer [--imap-server <imap.employer.com>]
-     [--email <your-email-address@employer.com>]
+  salesforce-email-fixer [--imap-server <imap.some-domain.com>]
+     [--email <your-email-address@some-domain.com>]
      [--salesforce-id <your-salesforce-account-name>]
 
      [--src-dest-folder <UNFILTERED-FILTERED-PAIR>]
@@ -22,9 +22,9 @@ SYNOPSIS
 
 BACKGROUND
 
-My {employer} uses Salesforce.com for various CRM functions.  I
-receive a regular stream of emails from Salesforce.com with Subject:
-headers that look something like this:
+A company that I work with uses Salesforce.com for various CRM
+functions.  I receive a regular stream of emails from Salesforce.com
+with Subject: headers that look something like this:
 
     New case comment notification.  Case Number 00012345
     New case comment notification.  Case Number 00533654
@@ -44,7 +44,8 @@ prioritize my email.  Quite frankly, when I look at an email Inbox
 with Subjects: like above, I can't quickly figure out which messages
 require immediate attention and which other ones are lower-priority.
 
-These emails would be a lot easier to deal with if they had Subject: headers like this:
+These emails would be a lot easier to deal with if they had Subject:
+headers like this:
 
     SF 00012345 - Acme Inc. - foo.jsp doesn't display under Chrome
     SF 00533654 - FrozzBozz Inc. - problem exists between keyboard and chair
@@ -71,12 +72,11 @@ configured to deal with Salesforce.
 
 MORE BACKGROUND
 
-Another problem that I have in this area is that at {employer} I
-access my email via {employer}'s IMAP server.  I do run my own IMAP
-server at home for my own email, but at {employer} I really do not
-want ot be running my own IMAP server.  There is no way that I can run
-any kind of non-trivial mail-processing code on {employer}'s IMAP
-server.  
+Another problem that I have in this area is that at my work-site I
+access my email via the company's IMAP server.  I do run my own IMAP
+server at home for my own email, but at work I really do not want ot
+be running my own IMAP server.  There is no way that I can run any
+kind of non-trivial mail-processing code on the company's IMAP server.
 
 SALESFORCE-EMAIL-FIXER
 
@@ -123,10 +123,10 @@ Here are some more details:
 
 OPTIONS
 
---imap-server <imap.employer.com>
+--imap-server <imap.some-domain.com>
      Specify your IMAP server.
 
---email <your-email-address@employer.com>
+--email <your-email-address@some-domain.com>
      Specify your email address.
 
 --salesforce-id <your-salesforce-account-name>
@@ -160,9 +160,9 @@ OPTIONS
 Here is how I typically invoke this program:
 
     
- salesforce-email-fixer --imap-server imap.employer.com \
-     --email kevin.clark@employer.com  \
-     --salesforce-id kevin.clark@employer.com \
+ salesforce-email-fixer --imap-server imap.some-domain.com \
+     --email kevin.clark@some-domain.com  \
+     --salesforce-id kevin.clark@some-domain.com \
      --src-dest-folder src:INBOX/Salesforce/unfiltered,dest:INBOX/Salesforce/filtered \
      --src-dest-folder src:INBOX/another-folder--unfiltered,dest:INBOX/another-folder \
  --daemon 30 -v -v
