@@ -52,12 +52,22 @@ These emails would be a lot easier to deal with if they had Subject: headers lik
     SF 00887644 - Acme Inc. - I18N problem
 
 I've been told through various channels that for these emails to be
-improved on the Salesforce side of the connection is 'impossible'.
+improved on the Salesforce side of the connection is 'impossible'.  I
+don't know if the problem here is technical or political, but I have
+heard about other Salesforce customers who complain about the same
+problem.
 
 Quite frankly, I can't get my work done every day if I am going to be
 interrupted by a regular stream of email messages with confusing
 Subjects of 'New case comment notification.  Case Number 00887644'.
 So, I decided I needed to create a utility to fix this problem.
+
+One caveat that I should mention in all of this is that I don't really
+deal with Salesforce's CRM via email except from the mail that I
+receive from Salesforce.  I never send mail to Salesforce -- the way
+that this utility changes Subject headers is something that is
+convenient for *me* but it might interfere with how other systems are
+configured to deal with Salesforce.
 
 MORE BACKGROUND
 
@@ -101,7 +111,11 @@ Here are some more details:
 2: the passwords used to access the IMAP server and the Salesforce
    account are never stored on disk or passed in via the command-line.
 
-2: in actuality, my Saleforce email arrives in more than one
+3: If an email in the 'unfiltered' folder has no Salesforce case# in
+   the Subject: header, then this email is simply moved over to the
+   'filtered' mailbox, unmodified.
+
+4: in actuality, my Saleforce email arrives in more than one
    IMAP 'unfiltered' Inbox (this is just how I have to handle my mail).
    So....this program handles more than one set of 'unfiltered/filtered'
    INBOX pairs.
