@@ -129,6 +129,11 @@ OPTIONS
      Specifies the amount of time to wait in between polling all of the
      unfiltered mailboxes.
 
+-k , --keep
+     Specifying this option causes this utility to keep (not delete)
+     mail from source folders {unfiltered}...but this mail will get
+     copied to the destination folder {filtered}.
+
 -v
      Turns on debug logging.  Specifying this flag more than once
      increases the verbosity of the logging.
