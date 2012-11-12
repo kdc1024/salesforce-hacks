@@ -179,6 +179,14 @@ fdm...).  Still, where possible, I borrow ideas for command-line
 arguments from these programs.
 
 
+HOW IT WORKS
+
+Each email message is fetched/stored via Python's imaplib library.  As
+each message is processed, the corresponding Salesforce information is
+looked up using the pyax module.  This talks to Salesforce via its
+SOAP API, returning information via JSON.  This utility fixes the
+Salesforce email accordingly.
+
 LICENSE
 
 GPL
