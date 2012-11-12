@@ -1,0 +1,477 @@
+#!/usr/bin/python
+
+"""
+NAME
+
+saleseforce-email-fixer - a utility that helps make incoming emails from
+                          Salesforce.com easier for humans to deal with.
+
+SYNOPSIS
+
+  salesforce-email-fixer [--imap-server <imap.employer.com>]
+     [--email <your-email-address@employer.com>]
+     [--salesforce-id <your-salesforce-account-name>]
+
+     [--src-dest-folder <UNFILTERED-FILTERED-PAIR>]
+     .....
+     [--src-dest-folder <UNFILTERED-FILTERED-PAIR>]
+
+     [--daemon <time>]
+     [-v] [-h|--help]
+
+
+BACKGROUND
+
+My {employer} uses Salesforce.com for various CRM functions.  I
+receive a regular stream of emails from Salesforce.com with Subject:
+headers that look something like this:
+
+    New case comment notification.  Case Number 00012345
+    New case comment notification.  Case Number 00533654
+    New case comment notification.  Case Number 00667788
+    New case comment notification.  Case Number 00887644
+
+There are various other Subject headers as well.  These emails get
+generated anytime a customer or a co-worker does anything associated
+with a Salesforce case.  Like I said, I receive a regular stream of
+messages like this one.
+
+I find these emails to be really inconvenient.  While it is true that
+all of these emails include a URL back to Salesforce.com so I can
+refer to the Salesforce case, the problem is that I am a serious email
+user and I rely upon email Subject: headers to be able to sort and
+prioritize my email.  Quite frankly, when I look at an email Inbox
+with Subjects: like above, I can't quickly figure out which messages
+require immediate attention and which other ones are lower-priority.
+
+These emails would be a lot easier to deal with if they had Subject: headers like this:
+
+    SF 00012345 - Acme Inc. - foo.jsp doesn't display under Chrome
+    SF 00533654 - FrozzBozz Inc. - problem exists between keyboard and chair
+    SF 00667788 - University of Nowhere - performance problem
+    SF 00887644 - Acme Inc. - I18N problem
+
+I've been told through various channels that for these emails to be
+improved on the Salesforce side of the connection is 'impossible'.
+
+Quite frankly, I can't get my work done every day if I am going to be
+interrupted by a regular stream of email messages with confusing
+Subjects of 'New case comment notification.  Case Number 00887644'.
+So, I decided I needed to create a utility to fix this problem.
+
+MORE BACKGROUND
+
+Another problem that I have in this area is that at {employer} I
+access my email via {employer}'s IMAP server.  I do run my own IMAP
+server at home for my own email, but at {employer} I really do not
+want ot be running my own IMAP server.  There is no way that I can run
+any kind of non-trivial mail-processing code on {employer}'s IMAP
+server.  
+
+SALESFORCE-EMAIL-FIXER
+
+"salesforce-email-fixer" is a hack that I wrote to solve my problems
+in this area.  This program filters incoming Salesforce email,
+changing the email Subject: header to be in the format of:
+
+    SF {case number} - {customer} - {case subject}
+
+This utility modifies all of the emails on the IMAP server, leaving
+these on the server.
+
+The way that I use this utility is as follows: I sort all of my
+incoming Salesforce email into a folder called 'unfiltered'.  I have
+actually configured my email reading program to not even pay attention
+to email in this folder.  This is where the original,
+hard-to-deal-with Salesforce email arrives.  This utility polls this
+'unfiltered' mailbox every {N} seconds (default: 5 minutes).  As new
+mail arrives in the 'unfiltered' mailbox, this utility reads in these
+mail messages, parses the ugly Subject: header, looks up the case
+information on Salesforce.com, rewrites the Subject header, and then
+places the modified message into a 'filtered' IMAP inbox.  I have
+configured my mail reader to pay attention to this 'filtered' folder.
+When I look at the messages in the 'filtered' folder, they all have
+useful Subject: headers that are convenient to read in traditional
+email readers, as well as on mobile devices.
+
+Here are some more details:
+
+1: the IMAP server is accessed via IMAP/SSL
+
+2: the passwords used to access the IMAP server and the Salesforce
+   account are never stored on disk or passed in via the command-line.
+
+2: in actuality, my Saleforce email arrives in more than one
+   IMAP 'unfiltered' Inbox (this is just how I have to handle my mail).
+   So....this program handles more than one set of 'unfiltered/filtered'
+   INBOX pairs.
+
+
+OPTIONS
+
+--imap-server <imap.employer.com>
+     Specify your IMAP server.
+
+--email <your-email-address@employer.com>
+     Specify your email address.
+
+--salesforce-id <your-salesforce-account-name>
+     Specify your Saleforce account.
+
+--src-dest-folder <UNFILTERED-FILTERED-PAIR>
+     Specify an unfiltered/filtered IMAP mailbox pair.
+
+     <UNFILTERED-FILTERED-PAIR could look (sort-of) like:
+
+     src:INBOX/Salesforce/unfiltered,dest:INBOX/Salesforce/filtered      
+
+--daemon <time>
+     Specifies the amount of time to wait in between polling all of the
+     unfiltered mailboxes.
+
+-v
+     Turns on debug logging.  Specifying this flag more than once
+     increases the verbosity of the logging.
+
+-h , --help
+     Displays this help.
+
+
+
+Here is how I typically invoke this program:
+
+    
+ salesforce-email-fixer --imap-server imap.employer.com \
+     --email kevin.clark@employer.com  \
+     --salesforce-id kevin.clark@employer.com \
+     --src-dest-folder src:INBOX/Salesforce/unfiltered,dest:INBOX/Salesforce/filtered \
+     --src-dest-folder src:INBOX/another-folder--unfiltered,dest:INBOX/another-folder \
+ --daemon 30 -v -v
+
+
+
+DESIGN NOTE
+
+Design note: this utility might remind you of some wild mashup of
+fetchmail, procmail, fdm.  I thought about using these utilities to
+solve this problem, but I quickly came to the conclusion that none of
+these did what I wanted (or...worked...I'm disappointed with you,
+fdm...).  Still, where possible, I borrow ideas for command-line
+arguments from these programs.
+
+
+LICENSE
+
+GPL
+
+AUTHOR:
+
+Kevin D. Clark (kdc [at] alumni [dot] unh [dot] edu)
+http://kdc-blog.blogspot.com/
+
+
+"""
+
+import sys, getopt, re, json, ast, time, getpass, imaplib, logging
+from pyax.client import Client
+
+
+
+# CHANGELOG
+#
+#  0.1 - kdc - sep 2012 - Initial version
+#  0.2 - kdc - sep 2012 - removed colorful language
+#  0.3 - kdc - oct 2012 - added ability to handle multiple Inboxes
+
+
+###########################################################################
+class Usage(Exception):
+    def __init__(self, msg):
+        self.msg = msg
+
+###########################################################################
+
+def transmogrify_message(options, sfdc, msg):
+    sf_case_num = "unknown"
+
+    try:
+        m = re.search(r'\nSubject:\s*(?P<subject>.*)', msg);
+        subject = m.group("subject")
+
+        m = re.search(r'\b(?P<case>\d{8})\b', subject);
+        sf_case_num = m.group("case")
+    except:
+        logging.warning("Couldn't find SF case# in message")
+        logging.debug("Here it is:")
+        logging.debug(msg)
+        return msg
+
+    try:
+        response = sfdc.query("select Id, CaseNumber, Account.Name, Subject FROM Case where CaseNumber = '" + sf_case_num + "'")
+
+        sfdata = None
+        for key in response.iterkeys():
+            sfcase = repr(response.get(key));
+            sfdata = ast.literal_eval("[ " + sfcase + " ]")
+            break
+
+        sf_account_name = sfdata[0]["Account"]["Name"]
+        sf_case_subject = sfdata[0]["Subject"]
+
+        fixed_subject = "SF " + sf_case_num + " - " + \
+                        sf_account_name + " - " + \
+                        sf_case_subject
+
+        logging.info("Replacing: " + subject)
+        logging.info("     With: " + fixed_subject)
+        logging.info("")
+
+
+        # not working yet
+        #fixed_msg = transmogrify_subject(options, msg, fixed_subject)
+
+        fixed_msg = re.sub(r'Subject:.*',
+                           r'Subject: ' + fixed_subject, msg, 1);
+
+        logging.debug(fixed_msg)
+        logging.debug(r'\n\n')
+
+        msg = fixed_msg
+
+    except TypeError as e:
+        # This can happen when the SF case disappears.
+        # Eat the exception and simply return the original message
+        logging.debug("TypeError with %s: %s", sf_case_num, sys.exc_info()[0])
+    
+    except:
+        logging.exception("Unexpected error:")
+        logging.error(msg)
+    
+    return msg
+
+
+
+###########################################################################
+def fix_the_mail(options):
+    sfdc = None
+
+    logging.debug("     my_email_addr: %s", options["my_email_addr"])
+    logging.debug("  my_salesforce_id: %s", options["my_salesforce_id"])
+
+    try:
+        sfdc = Client.connect(options["my_salesforce_id"],
+                              options["my_salesforce_password"], token='')
+
+        M = imaplib.IMAP4_SSL(options["imap_server"])
+        M.login(options["my_email_addr"], options["my_email_password"])
+
+
+
+        for sdspec in options["src_dest_folder_list"]:
+
+            src_folder  = options["src_imap_folder"][sdspec]
+            dest_folder = options["dest_imap_folder"][sdspec]
+            logging.debug("Source folder: " + src_folder)
+            logging.debug("Destination folder: " + dest_folder)
+    
+            # to keep or not to keep, that is the question
+            if options["keep"]:
+                logging.info("Keeping (not deleting) mail from source folder")
+                M.select(src_folder, readonly=True)
+            else:
+                logging.info("Mail will be deleted from source folder " + \
+                             "after processing")
+                M.select(src_folder)
+    
+            typ, data = M.search(None, 'ALL')
+            for num in data[0].split():
+                typ, data = M.fetch(num, '(RFC822)')
+    
+                # Sometimes this happens and I haven't tracked down why yet
+                if data[0] == None:
+                    logging.debug("Strange problem with returned IMAP data, " + \
+                                  "continuing....")
+                    continue;
+    
+                message = transmogrify_message(options, sfdc, data[0][1])
+    
+                M.append(dest_folder, "",
+                         imaplib.Time2Internaldate(time.time()),
+                         message)
+    
+                if not options["keep"]:
+                    M.store(num, '+FLAGS', '\\Deleted')
+    
+            if not options["keep"]:
+                # DRAIN THE SWAMP!!!!
+                M.expunge()
+            
+        M.close()
+        M.logout()
+
+    except Exception as e:
+        logging.exception("Unexpected error:")
+
+    else:
+        if sfdc == None:
+            sfdc.logout()
+
+
+###########################################################################
+
+def parse_src_dest_folders(options):
+    options["src_imap_folder"] = {}   # Python has no autovivication
+    options["dest_imap_folder"] = {}  # Python has no autovivication
+    
+    for sdspec in options["src_dest_folder_list"]:
+        folder_list = sdspec.split(",")
+        p = re.compile(r'^(?:src|dest):')
+
+        src_imap_folder  = re.sub(p, '', folder_list[0], 1);
+        dest_imap_folder = re.sub(p, '', folder_list[1], 1);
+
+        options["src_imap_folder"][sdspec]  = src_imap_folder
+        options["dest_imap_folder"][sdspec] = dest_imap_folder
+
+
+###########################################################################
+
+def configure_logging(options):
+    if options["verbose"] >1:
+        logging.basicConfig(level=logging.DEBUG)
+    elif options["verbose"] == 1:
+        logging.basicConfig(level=logging.INFO)
+
+
+    logging.debug("This is a debug message")
+    logging.info("This is an info message")
+    logging.warning("This is a warning message")
+
+
+###########################################################################
+
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv
+    try:
+        try:
+            opts, args = getopt.getopt(argv[1:], "hvkd:",
+                                       ["help", "email=",
+                                        "salesforce-id=",
+
+                                        "imap-server=",
+
+                                        "source-folder=",
+                                        "destination-folder=",
+
+                                        "src-dest-folder=",
+
+                                        "verbose",
+
+                                        "keep",
+                                        "poll-time=",
+                                        "daemon=",
+
+
+                                        ])
+        except getopt.error, msg:
+             raise Usage(msg)
+        # more code, unchanged
+    except Usage, err:
+        print >>sys.stderr, err.msg
+        print >>sys.stderr, "for help use --help"
+        return 2
+
+    options = { 
+        "my_email_addr"          : None,
+        "my_email_password"      : None,
+        "my_salesforce_id"       : None,
+        "my_salesforce_password" : None,
+
+        "imap_server"            : None,
+        
+        "source_folder"          : None,
+        "destination_folder"     : None,
+
+        # this is a raw list of the command line arguments that the user
+        # passed to us.
+        "src_dest_folder_list"    : [],
+
+        # this is a dict:
+        #    key:  values from options["src_dest_folder_list"]
+        #  value:  source IMAP folder names (parsed from raw input)
+        "src_folder_dict"         : {},
+
+        # this is a dict:
+        #    key:  values from options["src_dest_folder_list"]
+        #  value:  destination IMAP folder names (parsed from raw input)
+        "dest_folder_dict"         : {},
+
+        
+        "keep"                   : 0,
+
+        "daemon"                 : 300,
+        
+        "verbose"                : 0,
+        }
+
+    for opt, arg in opts:
+        if opt in ('-h', '--help'):
+            print __doc__
+            sys.exit(0)
+        if opt in ('--email'):
+            options["my_email_addr"] = arg
+        elif opt in ('--salesforce-id'):
+            options["my_salesforce_id"] = arg
+
+        elif opt in ('--imap-server'):
+            options["imap_server"] = arg
+            
+        elif opt in ('--source-folder'):
+            options["source_folder"] = arg
+        elif opt in ('--destination-folder'):
+            options["destination_folder"] = arg
+
+        elif opt in ('--src-dest-folder'):
+            options["src_dest_folder_list"].append(arg)
+            
+        elif opt in ('-d', '--daemon'):
+            options["daemon"] = float(arg)
+        elif opt in ('-k', '--keep'):
+            options["keep"] = 1
+        elif opt in ('-v', '--verbose'):
+            options["verbose"]+=1
+
+    if (options["my_email_addr"]      == None or
+        options["my_salesforce_id"]   == None):
+
+        print >>sys.stderr, "Specify all of the args"
+        return 1
+
+    configure_logging(options)
+
+    parse_src_dest_folders(options)
+    
+
+    print ("Please enter the password for the email account ",
+          options["my_email_addr"])
+    options["my_email_password"] = getpass.getpass()
+    
+    print ("Please enter the password for the Salesforce account ",
+           options["my_salesforce_id"])
+    options["my_salesforce_password"] = getpass.getpass()
+    
+
+    while 1:
+        logging.info("Fixing the mail")
+        fix_the_mail(options)
+
+        logging.info("sleeping for %s seconds", options["daemon"])
+        time.sleep(options["daemon"])
+        
+
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
