@@ -199,7 +199,9 @@ http://kdc-blog.blogspot.com/
 
 """
 
-import sys, getopt, re, json, ast, time, getpass, imaplib, logging
+#import sys, getopt, re, json, ast, time, getpass, imaplib, logging, anydbm
+import sys, getopt, re, ast, time, getpass, imaplib, logging, anydbm
+from email.parser import Parser
 from pyax.client import Client
 
 
@@ -209,6 +211,9 @@ from pyax.client import Client
 #  0.1 - kdc - sep 2012 - Initial version
 #  0.2 - kdc - sep 2012 - removed colorful language
 #  0.3 - kdc - oct 2012 - added ability to handle multiple Inboxes
+#  0.4 - kdc - dec 2012 - added ability to add In-Reply-To and References
+#                         headers so that these messages can be threaded
+#                         by reasonable email programs.
 
 
 ###########################################################################
@@ -217,13 +222,85 @@ class Usage(Exception):
         self.msg = msg
 
 ###########################################################################
+#  This is our best effort to make it such that reasonable email
+#  clients can "thread" these messages.  The email that Salesforce
+#  generates comes with a Message-ID: header but no In-Reply-To: or
+#  References: headers.
+#
+#  Nothing we do here can be perfect...Salesforce should be the thing
+#  that is generating these headers, not this utility.
 
-def transmogrify_message(options, sfdc, msg):
+
+def transmogrify_message_references(options, srdb, msg):
+    orig_msg = msg
+
+    subject = msg_id = in_reply_to = references = None
+
+    headers = Parser().parsestr(msg)
+    
+    try:
+        if 'subject' in headers:
+            subject = headers['subject'].rstrip()
+
+        if 'message-id' in headers:
+            msg_id = headers['message-id'].rstrip()
+
+        if 'in-reply-to' in headers:
+            in_reply_to = headers['in-reply-to'].rstrip()
+
+        if 'references' in headers:
+            references = headers['references'].rstrip()
+
+    except AttributeError:
+        pass
+    
+    if (in_reply_to != None or references != None):        
+        # These fields are already set.  Leave msg alone
+        logging.info("Message already has In-Reply-To: and/or References: in headers: " + subject);
+
+
+        headers['X-SF-Foo']  = "Yadda"
+        msg = headers.as_string()
+        return msg
+
+    if subject not in srdb:
+        logging.info("Adding Subject: to DB: " + subject);
+        srdb[subject] = msg_id
+
+        headers['X-SF-Foo']  = "Yadda"
+        msg = headers.as_string()
+
+    else:
+        logging.info("Found Subject in DB: " + subject);
+        del headers['in-reply-to']
+        del headers['references']
+#        headers['In-Reply-To'] = srdb[subject]
+#        headers['References']  = srdb[subject]
+        headers['in-reply-to'] = "SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString"
+        headers['references']  = "SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString"
+
+        headers['X-SF-Foo']  = "Yadda"
+
+        msg = headers.as_string()
+
+
+    #print "\n\n\n\n\n\n\n" + msg + "\n\n\n\n\n\n"
+
+    return msg
+
+
+###########################################################################
+
+def transmogrify_message_subject(options, sfdc, msg):
     sf_case_num = "unknown"
 
+    subject = None
+
+    headers = Parser().parsestr(msg)
+
     try:
-        m = re.search(r'\nSubject:\s*(?P<subject>.*)', msg);
-        subject = m.group("subject")
+        if 'subject' in headers:
+            subject = headers['subject'].rstrip()
 
         m = re.search(r'\b(?P<case>\d{8})\b', subject);
         sf_case_num = m.group("case")
@@ -257,13 +334,18 @@ def transmogrify_message(options, sfdc, msg):
         # not working yet
         #fixed_msg = transmogrify_subject(options, msg, fixed_subject)
 
-        fixed_msg = re.sub(r'Subject:.*',
-                           r'Subject: ' + fixed_subject, msg, 1);
 
-        logging.debug(fixed_msg)
-        logging.debug(r'\n\n')
+        del headers['X-SF-Fixer-Orig-Subject']
+        headers['X-SF-Fixer-Orig-Subject'] = headers['Subject']
+        
+        del headers['subject']
+        headers['Subject'] = fixed_subject
 
-        msg = fixed_msg
+        #        fixed_msg = re.sub(r'Subject:.*',
+        #                           r'Subject: ' + fixed_subject, msg, 1);
+        #        msg = fixed_msg
+
+        msg = headers.as_string()
 
     except TypeError as e:
         # This can happen when the SF case disappears.
@@ -276,7 +358,16 @@ def transmogrify_message(options, sfdc, msg):
     
     return msg
 
+###########################################################################
+def transmogrify_message(options, sfdc, srdb, msg):
 
+    msg = transmogrify_message_subject(options, sfdc, msg)
+    #msg = transmogrify_message_references(options, srdb, msg)
+
+    logging.debug(msg)
+    logging.debug(r'\n\n')
+   
+    return msg
 
 ###########################################################################
 def fix_the_mail(options):
@@ -286,28 +377,29 @@ def fix_the_mail(options):
     logging.debug("  my_salesforce_id: %s", options["my_salesforce_id"])
 
     try:
+        #  Establish a session to Salesforce.com
         sfdc = Client.connect(options["my_salesforce_id"],
                               options["my_salesforce_password"], token='')
 
+        # Open {Subject->References} database
+        srdb = anydbm.open('/home/kclark/.salesforce-email-fixer-subjects.db', 'c')
+
+        # Establish an IMAP connection
         M = imaplib.IMAP4_SSL(options["imap_server"])
         M.login(options["my_email_addr"], options["my_email_password"])
-
 
 
         for sdspec in options["src_dest_folder_list"]:
 
             src_folder  = options["src_imap_folder"][sdspec]
             dest_folder = options["dest_imap_folder"][sdspec]
-            logging.debug("Source folder: " + src_folder)
-            logging.debug("Destination folder: " + dest_folder)
+
+            logging.info("src/dest folders: %s / %s", src_folder, dest_folder)
     
             # to keep or not to keep, that is the question
             if options["keep"]:
-                logging.info("Keeping (not deleting) mail from source folder")
                 M.select(src_folder, readonly=True)
             else:
-                logging.info("Mail will be deleted from source folder " + \
-                             "after processing")
                 M.select(src_folder)
     
             typ, data = M.search(None, 'ALL')
@@ -320,7 +412,7 @@ def fix_the_mail(options):
                                   "continuing....")
                     continue;
     
-                message = transmogrify_message(options, sfdc, data[0][1])
+                message = transmogrify_message(options, sfdc, srdb, data[0][1])
     
                 M.append(dest_folder, "",
                          imaplib.Time2Internaldate(time.time()),
@@ -340,8 +432,15 @@ def fix_the_mail(options):
         logging.exception("Unexpected error:")
 
     else:
-        if sfdc == None:
-            sfdc.logout()
+        try:
+            if sfdc != None:
+                sfdc.logout()
+
+            if srdb != None:
+                srdb.close()
+
+        except Exception as e:
+            logging.exception("Unexpected error while freeing resources:")
 
 
 ###########################################################################
@@ -412,6 +511,7 @@ def main(argv=None):
     options = { 
         "my_email_addr"          : None,
         "my_email_password"      : None,
+
         "my_salesforce_id"       : None,
         "my_salesforce_password" : None,
 
@@ -489,11 +589,17 @@ def main(argv=None):
     options["my_salesforce_password"] = getpass.getpass()
     
 
+    if options["keep"]:
+        logging.info("Keeping (not deleting) mail from source folder")
+    else:
+        logging.info("Mail will be deleted from source folder " + \
+                     "after processing")
+
     while 1:
         logging.info("Fixing the mail")
         fix_the_mail(options)
 
-        logging.info("sleeping for %s seconds", options["daemon"])
+        logging.info("sleeping for %s seconds\n", options["daemon"])
         time.sleep(options["daemon"])
         
 
