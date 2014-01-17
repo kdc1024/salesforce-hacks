@@ -214,6 +214,12 @@ from pyax.client import Client
 #  0.4 - kdc - dec 2012 - added ability to add In-Reply-To and References
 #                         headers so that these messages can be threaded
 #                         by reasonable email programs.
+#                         (this feature isn't actually working yet ; 
+#                         the IMAP server that I deal with from
+#                         {well-known IMAP server} simply hasn't allowed
+#                         my code to thread the messages yet despite
+#                         the fact that my code produces seemingly
+#                         correct messages.  Still thinking about this...)
 
 
 ###########################################################################
@@ -270,16 +276,18 @@ def transmogrify_message_references(options, srdb, msg):
         headers['X-SF-Foo']  = "Yadda"
         msg = headers.as_string()
 
+
     else:
+        # Despite all of my efforts, this very reasonable code
+        # doesn't work for me.  I've pulled my hair out...
+
         logging.info("Found Subject in DB: " + subject);
         del headers['in-reply-to']
         del headers['references']
 #        headers['In-Reply-To'] = srdb[subject]
 #        headers['References']  = srdb[subject]
-        headers['in-reply-to'] = "SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString"
-        headers['references']  = "SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString"
 
-        headers['X-SF-Foo']  = "Yadda"
+#        headers['X-SF-Foo']  = "Yadda"
 
         msg = headers.as_string()
 
