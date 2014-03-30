@@ -214,12 +214,6 @@ from pyax.client import Client
 #  0.4 - kdc - dec 2012 - added ability to add In-Reply-To and References
 #                         headers so that these messages can be threaded
 #                         by reasonable email programs.
-#                         (this feature isn't actually working yet ; 
-#                         the IMAP server that I deal with from
-#                         {well-known IMAP server} simply hasn't allowed
-#                         my code to thread the messages yet despite
-#                         the fact that my code produces seemingly
-#                         correct messages.  Still thinking about this...)
 
 
 ###########################################################################
@@ -276,18 +270,16 @@ def transmogrify_message_references(options, srdb, msg):
         headers['X-SF-Foo']  = "Yadda"
         msg = headers.as_string()
 
-
     else:
-        # Despite all of my efforts, this very reasonable code
-        # doesn't work for me.  I've pulled my hair out...
-
         logging.info("Found Subject in DB: " + subject);
         del headers['in-reply-to']
         del headers['references']
 #        headers['In-Reply-To'] = srdb[subject]
 #        headers['References']  = srdb[subject]
+        headers['in-reply-to'] = "SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString"
+        headers['references']  = "SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString_SomeJunkString"
 
-#        headers['X-SF-Foo']  = "Yadda"
+        headers['X-SF-Foo']  = "Yadda"
 
         msg = headers.as_string()
 
@@ -380,21 +372,22 @@ def transmogrify_message(options, sfdc, srdb, msg):
 ###########################################################################
 def fix_the_mail(options):
     sfdc = None
-
-    logging.debug("     my_email_addr: %s", options["my_email_addr"])
-    logging.debug("  my_salesforce_id: %s", options["my_salesforce_id"])
+    imap = None
 
     try:
         #  Establish a session to Salesforce.com
+        logging.debug("Connecting to Salesforce.com")
         sfdc = Client.connect(options["my_salesforce_id"],
                               options["my_salesforce_password"], token='')
 
         # Open {Subject->References} database
+        logging.debug("Opening Subject->References DB")
         srdb = anydbm.open('/home/kclark/.salesforce-email-fixer-subjects.db', 'c')
 
         # Establish an IMAP connection
-        M = imaplib.IMAP4_SSL(options["imap_server"])
-        M.login(options["my_email_addr"], options["my_email_password"])
+        logging.debug("Establishing IMAP Connection")
+        imap = imaplib.IMAP4_SSL(options["imap_server"])
+        imap.login(options["my_email_addr"], options["my_email_password"])
 
 
         for sdspec in options["src_dest_folder_list"]:
@@ -406,13 +399,13 @@ def fix_the_mail(options):
     
             # to keep or not to keep, that is the question
             if options["keep"]:
-                M.select(src_folder, readonly=True)
+                imap.select(src_folder, readonly=True)
             else:
-                M.select(src_folder)
+                imap.select(src_folder)
     
-            typ, data = M.search(None, 'ALL')
+            typ, data = imap.search(None, 'ALL')
             for num in data[0].split():
-                typ, data = M.fetch(num, '(RFC822)')
+                typ, data = imap.fetch(num, '(RFC822)')
     
                 # Sometimes this happens and I haven't tracked down why yet
                 if data[0] == None:
@@ -422,30 +415,31 @@ def fix_the_mail(options):
     
                 message = transmogrify_message(options, sfdc, srdb, data[0][1])
     
-                M.append(dest_folder, "",
-                         imaplib.Time2Internaldate(time.time()),
-                         message)
+                imap.append(dest_folder, "",
+                            imaplib.Time2Internaldate(time.time()),
+                            message)
     
                 if not options["keep"]:
-                    M.store(num, '+FLAGS', '\\Deleted')
+                    imap.store(num, '+FLAGS', '\\Deleted')
     
             if not options["keep"]:
                 # DRAIN THE SWAMP!!!!
-                M.expunge()
+                imap.expunge()
             
-        M.close()
-        M.logout()
-
     except Exception as e:
         logging.exception("Unexpected error:")
 
     else:
         try:
-            if sfdc != None:
-                sfdc.logout()
+            if imap != None:
+                imap.close()
+                imap.logout()
 
             if srdb != None:
                 srdb.close()
+
+            if sfdc != None:
+                sfdc.logout()
 
         except Exception as e:
             logging.exception("Unexpected error while freeing resources:")
@@ -596,6 +590,8 @@ def main(argv=None):
            options["my_salesforce_id"])
     options["my_salesforce_password"] = getpass.getpass()
     
+    logging.debug("     my_email_addr: %s", options["my_email_addr"])
+    logging.debug("  my_salesforce_id: %s", options["my_salesforce_id"])
 
     if options["keep"]:
         logging.info("Keeping (not deleting) mail from source folder")
