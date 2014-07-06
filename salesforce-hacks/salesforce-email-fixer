@@ -214,7 +214,8 @@ from pyax.client import Client
 #  0.4 - kdc - dec 2012 - added ability to add In-Reply-To and References
 #                         headers so that these messages can be threaded
 #                         by reasonable email programs.
-
+#  0.5 - kdc - jul 2014   Add comments to make it clear that the threading
+#                         feature isn't quite working for me yet.
 
 ###########################################################################
 class Usage(Exception):
@@ -229,7 +230,12 @@ class Usage(Exception):
 #
 #  Nothing we do here can be perfect...Salesforce should be the thing
 #  that is generating these headers, not this utility.
-
+#
+#
+#  Note:  this function isn't used yet simply because the {very famous}
+#         IMAP server that I happen to use won't let me add these headers
+#         to the email messages.  I have spent a lot of time trying to
+#         figure out why this is so, but I have not worked this out yet. 
 
 def transmogrify_message_references(options, srdb, msg):
     orig_msg = msg
@@ -362,6 +368,8 @@ def transmogrify_message_subject(options, sfdc, msg):
 def transmogrify_message(options, sfdc, srdb, msg):
 
     msg = transmogrify_message_subject(options, sfdc, msg)
+
+    # See comments elsewhere for why this is commented out.
     #msg = transmogrify_message_references(options, srdb, msg)
 
     logging.debug(msg)
